@@ -1,26 +1,47 @@
 package basicauth
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
-// Auth middleware for basic authentication.
-func Auth(h http.HandlerFunc, requiredUser, requiredPassword string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Get the Basic Authentication credentials
-		user, password, hasAuth := r.BasicAuth()
+// UserPass holds user[password] for all authentication users.
+type UserPass struct {
+	users map[string]string
+}
 
-		if hasAuth && user == requiredUser && password == requiredPassword {
-			// Delegate request to the given handle
-			h(w, r)
-		} else {
-			// Request Basic Authentication otherwise
-			w.Header().Set("WWW-Authenticate", "Basic realm=Restricted")
-			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+func New() *UserPass {
+	return &UserPass{users: make(map[string]string)}
+}
+
+func (up *UserPass) AddUser(username, password string) {
+	up.users[username] = password
+}
+
+func (up *UserPass) DeleteUser(username string) {
+	delete(up.users, username)
+}
+
+// Auth performs basic authentication using http Basic realm.
+func (up *UserPass) Auth(fn http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		u, p, ok := req.BasicAuth()
+		if !ok || len(strings.TrimSpace(u)) < 1 || len(strings.TrimSpace(p)) < 1 {
+			unauthorised(w)
+			return
 		}
+
+		pass, ok := up.users[u]
+		if !ok || pass != p {
+			unauthorised(w)
+			return
+		}
+
+		fn(w, req)
 	}
 }
 
-// LogoutHandler for basic auth.
-func LogoutHandler(w http.ResponseWriter, req *http.Request) {
-	w.Header().Set("WWW-Authenticate", "Basic realm=Restricted")
-	http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+func unauthorised(rw http.ResponseWriter) {
+	rw.Header().Set("WWW-Authenticate", "Basic realm=Restricted")
+	rw.WriteHeader(http.StatusUnauthorized)
 }
